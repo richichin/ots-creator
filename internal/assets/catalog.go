@@ -60,10 +60,17 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 			if err := json.Unmarshal(r, &s); err != nil {
 				return nil, fmt.Errorf("%s: %w", CatalogFile, err)
 			}
-			if _, _, ok := SpriteDims(s.SpriteType); !ok || s.Last < s.First || s.Count() > SheetCapacity(s.SpriteType) {
+			if _, _, ok := SpriteDims(s.SpriteType); !ok {
+				// Sprite type of a newer client: its sprites are larger than
+				// this version can draw. Keep the entry untouched, so the
+				// catalog is written back as it was, and let the rest of the
+				// client open instead of refusing the whole folder.
+				c.others = append(c.others, r)
+			} else if s.Last < s.First || s.Count() > SheetCapacity(s.SpriteType) {
 				return nil, fmt.Errorf("%s: bad sprite sheet entry %s", CatalogFile, s.File)
+			} else {
+				c.Sheets = append(c.Sheets, s)
 			}
-			c.Sheets = append(c.Sheets, s)
 		default:
 			c.others = append(c.others, r)
 		}
