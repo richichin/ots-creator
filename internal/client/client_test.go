@@ -57,7 +57,7 @@ func TestFeatureDefaults(t *testing.T) {
 }
 
 func TestMetadataFormat(t *testing.T) {
-	cases := map[uint16]int{710: 1, 730: 1, 740: 2, 750: 2, 755: 3, 772: 3, 780: 4, 854: 4, 860: 5, 986: 5, 1010: 6, 1310: 6}
+	cases := map[uint16]int{710: 1, 730: 1, 740: 2, 750: 2, 755: 3, 772: 3, 780: 4, 854: 4, 860: 5, 986: 5, 1010: 6, 1098: 6, 1310: 7}
 	for v, want := range cases {
 		if got := MetadataFormat(v); got != want {
 			t.Errorf("MetadataFormat(%d) = %d, want %d", v, got, want)

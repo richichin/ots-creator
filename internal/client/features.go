@@ -41,7 +41,7 @@ func (f *Features) ApplyVersionDefaults(version uint16) {
 	}
 }
 
-// MetadataFormat returns which flag table a client version uses (1..6).
+// MetadataFormat returns which flag table a client version uses (1..7).
 func MetadataFormat(version uint16) int {
 	switch {
 	case version <= 730:
@@ -54,6 +54,8 @@ func MetadataFormat(version uint16) int {
 		return 4
 	case version <= 986:
 		return 5
+	case version >= 1310:
+		return 7
 	}
 	return 6
 }

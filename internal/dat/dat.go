@@ -15,7 +15,7 @@ const maxSpritesPerGroup = 1 << 16
 
 // Options select the encoding of a dat file.
 type Options struct {
-	// Format is the flag table (1..6), see client.MetadataFormat.
+	// Format is the flag table (1..7), see client.MetadataFormat.
 	Format   int
 	Features client.Features
 }
@@ -78,7 +78,7 @@ func Decode(data []byte, opts Options) (*File, error) {
 		list := make([]*thing.Thing, 0, maxID-c.MinID()+1)
 		for id := c.MinID(); id <= maxID; id++ {
 			t := &thing.Thing{ID: id, Category: c}
-			if err := table.ReadProperties(r, &t.Props); err != nil {
+			if err := table.ReadThing(r, t); err != nil {
 				return nil, fmt.Errorf("%s %d: %w", c, id, err)
 			}
 			if err := readGroups(r, t, opts); err != nil {
@@ -94,7 +94,7 @@ func Decode(data []byte, opts Options) (*File, error) {
 // ReadThing decodes one thing (flags + texture patterns) from r. OBD v1
 // uses this layout.
 func ReadThing(r *binio.Reader, t *thing.Thing, opts Options) error {
-	if err := Table(opts.Format).ReadProperties(r, &t.Props); err != nil {
+	if err := Table(opts.Format).ReadThing(r, t); err != nil {
 		return err
 	}
 	return readGroups(r, t, opts)
@@ -210,7 +210,9 @@ func WriteThing(w *binio.Writer, t *thing.Thing, opts Options) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	Table(opts.Format).WriteProperties(w, &t.Props)
+	if err := Table(opts.Format).WriteThing(w, t); err != nil {
+		return err
+	}
 	withGroups := opts.Features.FrameGroups && t.Category == thing.CategoryOutfit
 	groups := t.FrameGroups
 	if !withGroups {

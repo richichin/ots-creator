@@ -85,7 +85,7 @@ func decodeV1(r *binio.Reader) (*Data, error) {
 	}
 	t := &thing.Thing{Category: cat}
 	table := dat.Table(client.MetadataFormat(d.ClientVersion))
-	if err := table.ReadProperties(r, &t.Props); err != nil {
+	if err := table.ReadThing(r, t); err != nil {
 		return nil, err
 	}
 	g := &thing.FrameGroup{}
@@ -213,7 +213,9 @@ func EncodeRaw(d *Data) ([]byte, error) {
 	case Version1:
 		w.U16(d.ClientVersion)
 		w.UTF(t.Category.String())
-		dat.Table(client.MetadataFormat(d.ClientVersion)).WriteProperties(w, &t.Props)
+		if err := dat.Table(client.MetadataFormat(d.ClientVersion)).WriteThing(w, t); err != nil {
+			return nil, err
+		}
 		groups = groups[:1]
 	case Version2, Version3:
 		w.U16(uint16(d.Version))

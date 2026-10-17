@@ -65,9 +65,18 @@ type FlagTable struct {
 	name string
 	// offsetHasPayload is false for 7.10-7.50 where the offset flag means (8,8).
 	offsetHasPayload bool
-	byByte           map[byte]attr
-	byAttr           map[attr]byte
-	order            []byte // flag bytes in ascending order, used for writing
+	// lenient accepts flag bytes missing from byByte as flags without payload,
+	// like the default branch of the client parser (13.10+ only).
+	lenient bool
+	// extras describes the flags whose payload the model has no field for.
+	// They are kept in Thing13 so they survive a load/save cycle.
+	extras map[byte]extraKind
+	// npcSales is the flag byte of the NPC sale list, 0 when the format has
+	// none.
+	npcSales byte
+	byByte   map[byte]attr
+	byAttr   map[attr]byte
+	order    []byte // flag bytes in ascending order, used for writing
 }
 
 func newTable(name string, offsetPayload bool, m map[byte]attr) *FlagTable {
@@ -78,6 +87,79 @@ func newTable(name string, offsetPayload bool, m map[byte]attr) *FlagTable {
 	}
 	slices.Sort(t.order)
 	return t
+}
+
+// extraKind is the payload of a 13.10+ flag the model has no field for.
+type extraKind uint8
+
+const (
+	extraU16 extraKind = iota + 1
+	extraU32
+	extraBool
+	extraU32List
+)
+
+// Thing13 keeps the flags of the 13.10+ format that thing.Properties has no
+// field for. The keys are the flag bytes of the file, so writing a thing back
+// keeps them. Nothing published describes these flags yet: they are read from
+// the client parser (ThingType::unserialize) and preserved as they come.
+type Thing13 struct {
+	U16  map[byte]uint16
+	U32  map[byte]uint32
+	Bool map[byte]bool
+	List map[byte][]uint32
+}
+
+func (e *Thing13) set16(b byte, v uint16) {
+	if e.U16 == nil {
+		e.U16 = map[byte]uint16{}
+	}
+	e.U16[b] = v
+}
+
+func (e *Thing13) set32(b byte, v uint32) {
+	if e.U32 == nil {
+		e.U32 = map[byte]uint32{}
+	}
+	e.U32[b] = v
+}
+
+func (e *Thing13) setBool(b byte) {
+	if e.Bool == nil {
+		e.Bool = map[byte]bool{}
+	}
+	e.Bool[b] = true
+}
+
+func (e *Thing13) setList(b byte, v []uint32) {
+	if e.List == nil {
+		e.List = map[byte][]uint32{}
+	}
+	e.List[b] = v
+}
+
+// empty reports whether the thing has no flags to write.
+func (e *Thing13) empty() bool {
+	return e == nil || (len(e.U16) == 0 && len(e.U32) == 0 && len(e.Bool) == 0 && len(e.List) == 0)
+}
+
+// keys returns the flag bytes of the struct in ascending order.
+func (e *Thing13) keys() []byte {
+	out := make([]byte, 0, len(e.U16)+len(e.U32)+len(e.Bool)+len(e.List))
+	for b := range e.U16 {
+		out = append(out, b)
+	}
+	for b := range e.U32 {
+		out = append(out, b)
+	}
+	for b := range e.Bool {
+		out = append(out, b)
+	}
+	for b := range e.List {
+		out = append(out, b)
+	}
+	slices.Sort(out)
+	return out
 }
 
 var table1 = newTable("7.10-7.30", false, map[byte]attr{
@@ -145,6 +227,44 @@ var table6 = newTable("10.10+", true, map[byte]attr{
 	0x26: aTopEffect, 0x27: aBones, 0xFE: aUsable,
 })
 
+// table7 is the 13.10+ format of OTCv8 clients (KingsVale and friends).
+//
+// The parser of the client remaps every flag byte before switching on it:
+// raw > 0x10 becomes raw-1, raw 0x10 becomes 0xFD (the attribute the client
+// calls "no move animation"). Above that the payloads are the same ones of
+// 10.10+, except that bones (0x27) no longer carry offsets, and the format
+// adds eleven flags the model has no field for:
+//
+//	0x2F u16          0x33..0x36 boolean    0x38 u32
+//	0x30 NPC sales    0x37 u32 count + u32s 0x39 u32
+//	0x31 u16          0x3A, 0x3B boolean
+//	0x32 u16
+//
+// 0x23 is a u16 that the client knows as "usable"; the model stores it as the
+// default action because that is the u16 property it already has.
+var table7 = func() *FlagTable {
+	t := newTable("13.10+", true, map[byte]attr{
+		0x00: aGround, 0x01: aGroundBorder, 0x02: aOnBottom, 0x03: aOnTop, 0x04: aContainer,
+		0x05: aStackable, 0x06: aForceUse, 0x07: aMultiUse, 0x08: aWritable, 0x09: aWritableOnce,
+		0x0A: aFluidContainer, 0x0B: aFluid, 0x0C: aUnpassable, 0x0D: aUnmoveable,
+		0x0E: aBlockMissile, 0x0F: aBlockPathfind, 0x10: aNoMoveAnimation, 0x11: aPickupable,
+		0x12: aHangable, 0x13: aHookSouth, 0x14: aHookEast, 0x15: aRotatable, 0x16: aLight,
+		0x17: aDontHide, 0x18: aTranslucent, 0x19: aOffset, 0x1A: aElevation, 0x1B: aLyingObject,
+		0x1C: aAnimateAlways, 0x1D: aMiniMap, 0x1E: aLensHelp, 0x1F: aFullGround, 0x20: aIgnoreLook,
+		0x21: aCloth, 0x22: aMarket, 0x23: aDefaultAction, 0x24: aWrappable, 0x25: aUnwrappable,
+		0x26: aTopEffect, 0xFE: aUsable,
+	})
+	t.lenient = true
+	t.npcSales = 0x30
+	t.extras = map[byte]extraKind{
+		0x2F: extraU16, 0x31: extraU16, 0x32: extraU16,
+		0x33: extraBool, 0x34: extraBool, 0x35: extraBool, 0x36: extraBool,
+		0x37: extraU32List, 0x38: extraU32, 0x39: extraU32,
+		0x3A: extraBool, 0x3B: extraBool,
+	}
+	return t
+}()
+
 // OBDTable is the flag table of OBD v2/v3 files. It is the 10.10+ table
 // plus three private flags, without bones.
 var OBDTable = newTable("obd", true, map[byte]attr{
@@ -159,7 +279,7 @@ var OBDTable = newTable("obd", true, map[byte]attr{
 	0x26: aTopEffect, 0xFC: aHasCharges, 0xFD: aFloorChange, 0xFE: aUsable,
 })
 
-// Table returns the flag table for a metadata format (1..6, see
+// Table returns the flag table for a metadata format (1..7, see
 // client.MetadataFormat).
 func Table(format int) *FlagTable {
 	switch format {
@@ -173,6 +293,8 @@ func Table(format int) *FlagTable {
 		return table4
 	case 5:
 		return table5
+	case 7:
+		return table7
 	}
 	return table6
 }
@@ -180,8 +302,20 @@ func Table(format int) *FlagTable {
 // Name returns a human readable name of the table.
 func (t *FlagTable) Name() string { return t.name }
 
-// ReadProperties reads flags until LastFlag into p.
+// ReadProperties reads flags until LastFlag into p. Flags the model has no
+// field for are skipped.
 func (t *FlagTable) ReadProperties(r *binio.Reader, p *thing.Properties) error {
+	return t.readFlags(r, p, nil)
+}
+
+// ReadThing reads the flags of th into th.Props and keeps the payload of the
+// flags the model has no field for (the 13.10+ NPC sale list and the private
+// flags) in th.Extra.
+func (t *FlagTable) ReadThing(r *binio.Reader, th *thing.Thing) error {
+	return t.readFlags(r, &th.Props, th)
+}
+
+func (t *FlagTable) readFlags(r *binio.Reader, p *thing.Properties, th *thing.Thing) error {
 	prev := -1
 	for {
 		b := r.U8()
@@ -191,14 +325,99 @@ func (t *FlagTable) ReadProperties(r *binio.Reader, p *thing.Properties) error {
 		if b == LastFlag {
 			return nil
 		}
-		a, ok := t.byByte[b]
-		if !ok {
+		if k, ok := t.extras[b]; ok {
+			t.readExtra(r, k, b, th)
+		} else if t.npcSales != 0 && b == t.npcSales {
+			t.readNpcSales(r, th)
+		} else if a, ok := t.byByte[b]; ok {
+			t.readAttr(r, a, p)
+		} else if !t.lenient {
 			return fmt.Errorf("unknown flag 0x%02X (previous 0x%02X) for format %s at offset %d", b, prev, t.name, r.Pos()-1)
 		}
-		t.readAttr(r, a, p)
+		if r.Err() != nil {
+			return r.Err()
+		}
 		prev = int(b)
 	}
 }
+
+// readExtra reads the payload of a flag the model has no field for and keeps
+// it in the Thing13 of th. Without a thing the payload is only consumed.
+func (t *FlagTable) readExtra(r *binio.Reader, k extraKind, b byte, th *thing.Thing) {
+	var ex *Thing13
+	if th != nil {
+		switch cur := th.Extra.(type) {
+		case nil:
+			ex = &Thing13{}
+			th.Extra = ex
+		case *Thing13:
+			ex = cur
+		}
+	}
+	switch k {
+	case extraU16:
+		v := r.U16()
+		if ex != nil {
+			ex.set16(b, v)
+		}
+	case extraU32:
+		v := r.U32()
+		if ex != nil {
+			ex.set32(b, v)
+		}
+	case extraBool:
+		if ex != nil {
+			ex.setBool(b)
+		}
+	case extraU32List:
+		n := r.U32()
+		if n > maxExtraList {
+			r.Fail(fmt.Errorf("flag 0x%02X lists %d values", b, n))
+			return
+		}
+		vals := make([]uint32, n)
+		for i := range vals {
+			vals[i] = r.U32()
+		}
+		if ex != nil {
+			ex.setList(b, vals)
+		}
+	}
+}
+
+// maxExtraList guards the u32 list flag against corrupt counts.
+const maxExtraList = 1 << 16
+
+// readNpcSales reads the NPC sale list: a count, then for every entry the
+// price the NPC pays the player, the price the player pays the NPC, the NPC
+// name and where it stands.
+func (t *FlagTable) readNpcSales(r *binio.Reader, th *thing.Thing) {
+	n := r.U16()
+	if r.Err() != nil {
+		return
+	}
+	if n > maxNpcSales {
+		r.Fail(fmt.Errorf("npc sale list has %d entries", n))
+		return
+	}
+	sales := make([]thing.NpcSale, n)
+	for i := range sales {
+		buy := r.U32()
+		sale := r.U32()
+		name := r.Latin1(int(r.U16()))
+		location := r.Latin1(int(r.U16()))
+		if r.Err() != nil {
+			return
+		}
+		sales[i] = thing.NpcSale{Name: name, Location: location, BuyPrice: buy, SalePrice: sale}
+	}
+	if th != nil {
+		th.NpcSales = sales
+	}
+}
+
+// maxNpcSales guards the NPC sale list against corrupt counts.
+const maxNpcSales = 1 << 12
 
 func (t *FlagTable) readAttr(r *binio.Reader, a attr, p *thing.Properties) {
 	switch a {
@@ -406,6 +625,22 @@ func has(a attr, p *thing.Properties) bool {
 // WriteProperties writes every set flag that the table supports, in
 // ascending flag order, followed by LastFlag.
 func (t *FlagTable) WriteProperties(w *binio.Writer, p *thing.Properties) {
+	t.writeFlags(w, p)
+	w.U8(LastFlag)
+}
+
+// WriteThing writes the flags of th, followed by LastFlag: the properties,
+// the NPC sale list and the private flags kept in th.Extra.
+func (t *FlagTable) WriteThing(w *binio.Writer, th *thing.Thing) error {
+	t.writeFlags(w, &th.Props)
+	if err := t.write13(w, th); err != nil {
+		return err
+	}
+	w.U8(LastFlag)
+	return nil
+}
+
+func (t *FlagTable) writeFlags(w *binio.Writer, p *thing.Properties) {
 	for _, b := range t.order {
 		a := t.byByte[b]
 		if !has(a, p) {
@@ -414,7 +649,56 @@ func (t *FlagTable) WriteProperties(w *binio.Writer, p *thing.Properties) {
 		w.U8(b)
 		t.writePayload(w, a, p)
 	}
-	w.U8(LastFlag)
+}
+
+// write13 writes the flags of the 13.10+ format the model has no property for.
+func (t *FlagTable) write13(w *binio.Writer, th *thing.Thing) error {
+	if t.npcSales != 0 && len(th.NpcSales) > 0 {
+		if len(th.NpcSales) > maxNpcSales {
+			return fmt.Errorf("thing %d has %d npc sales", th.ID, len(th.NpcSales))
+		}
+		w.U8(t.npcSales)
+		w.U16(uint16(len(th.NpcSales)))
+		for _, s := range th.NpcSales {
+			name := binio.EncodeLatin1(s.Name)
+			location := binio.EncodeLatin1(s.Location)
+			w.U32(s.BuyPrice)
+			w.U32(s.SalePrice)
+			w.U16(uint16(len(name)))
+			w.Write(name)
+			w.U16(uint16(len(location)))
+			w.Write(location)
+		}
+	}
+	ex, _ := th.Extra.(*Thing13)
+	if ex.empty() {
+		return nil
+	}
+	for _, b := range ex.keys() {
+		switch t.extras[b] {
+		case extraU16:
+			w.U8(b)
+			w.U16(ex.U16[b])
+		case extraU32:
+			w.U8(b)
+			w.U32(ex.U32[b])
+		case extraBool:
+			if ex.Bool[b] {
+				w.U8(b)
+			}
+		case extraU32List:
+			vals := ex.List[b]
+			if len(vals) > maxExtraList {
+				return fmt.Errorf("thing %d flag 0x%02X lists %d values", th.ID, b, len(vals))
+			}
+			w.U8(b)
+			w.U32(uint32(len(vals)))
+			for _, v := range vals {
+				w.U32(v)
+			}
+		}
+	}
+	return nil
 }
 
 func (t *FlagTable) writePayload(w *binio.Writer, a attr, p *thing.Properties) {
