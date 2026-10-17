@@ -14,6 +14,7 @@
 [Download](https://github.com/nekiro/ots-creator/releases/latest) ·
 [Features](#features) ·
 [Map editor](#map-editor) ·
+[13.x clients](#13x-clients) ·
 [OTOBJ format](#otobj-object-format) ·
 [Development](#development)
 
@@ -146,6 +147,14 @@ the open client; object changes show after **Reload from client**.
   keeps it (WebGL2), so panning and zooming only move the camera and only animated sprites
   update per frame. Plain tiles are stored packed, so maps with millions of tiles stay
   small in memory.
+
+## 13.x clients
+
+Dat/spr clients up to 13.10 are supported, including the OTCv8 format that KingsVale and
+friends use. Those dats store NPC trade prices and a handful of flags the model has no
+field for; the editor reads them, keeps them and writes them back unchanged, and even
+falls back to another flag table when a client's version maps to the wrong one. How the
+format works and how to check a table against a client: [docs/dat-13.10.md](docs/dat-13.10.md).
 
 ## OTOBJ object format
 

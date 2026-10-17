@@ -74,7 +74,7 @@ func DecompressInto(dst, data []byte, size int, transparent bool) error {
 		pos += 4
 		pixel += skip
 		if pixel+colored > n {
-			return fmt.Errorf("spr: pixel overflow (%d > %d)", pixel+colored, n)
+			return fmt.Errorf("spr: pixel overflow (%d pixels > %d): the data does not match sprite-size %d and transparency %t, check the client's otfi", pixel+colored, n, size, transparent)
 		}
 		if pos+colored*channels > len(data) {
 			return fmt.Errorf("spr: truncated pixel data at %d", pos)

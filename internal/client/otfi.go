@@ -22,6 +22,19 @@ type OTFI struct {
 	Features     Features `json:"features"`
 	MetadataFile string   `json:"metadataFile"`
 	SpritesFile  string   `json:"spritesFile"`
+	// SpriteDataSize is the bytes per sprite the file declares (13.x clients
+	// write 4096). Zero when the otfi does not say.
+	SpriteDataSize int `json:"spriteDataSize"`
+}
+
+// ExpectedSpriteDataSize returns the bytes per sprite implied by the features:
+// a size x size sprite with three or four channels per pixel.
+func (f Features) ExpectedSpriteDataSize() int {
+	channels := 3
+	if f.Transparency {
+		channels = 4
+	}
+	return f.SpriteSize * f.SpriteSize * channels
 }
 
 // ParseOTFI parses the DatSpr node of an OTML document.
@@ -72,6 +85,12 @@ func ParseOTFI(data []byte) (OTFI, error) {
 				return o, fmt.Errorf("otfi line %d: bad sprite-size %q", line, value)
 			}
 			o.Features.SpriteSize = n
+		case "sprite-data-size":
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				return o, fmt.Errorf("otfi line %d: bad sprite-data-size %q", line, value)
+			}
+			o.SpriteDataSize = n
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -107,6 +126,9 @@ func (o OTFI) Marshal() []byte {
 	}
 	if o.Features.SpriteSize != 0 && o.Features.SpriteSize != DefaultSpriteSize {
 		fmt.Fprintf(&b, "  sprite-size: %d\n", o.Features.SpriteSize)
+	}
+	if o.SpriteDataSize != 0 {
+		fmt.Fprintf(&b, "  sprite-data-size: %d\n", o.SpriteDataSize)
 	}
 	return []byte(b.String())
 }

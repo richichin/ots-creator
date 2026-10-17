@@ -91,7 +91,11 @@ func (f *File) Pixels(id uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Decompress(c, f.opts.size(), f.opts.Transparent)
+	px, err := Decompress(c, f.opts.size(), f.opts.Transparent)
+	if err != nil {
+		return nil, fmt.Errorf("sprite %d (%dx%d, transparency %t): %w", id, f.opts.SpriteSize, f.opts.SpriteSize, f.opts.Transparent, err)
+	}
+	return px, nil
 }
 
 // Source supplies compressed sprites for Encode.

@@ -87,6 +87,12 @@ func inspectClient(path string) (ClientFiles, error) {
 		if err != nil {
 			return cf, err
 		}
+		// A client whose otfi contradicts itself cannot be read: the sprites
+		// would decode with the wrong number of channels.
+		if want := o.Features.ExpectedSpriteDataSize(); o.SpriteDataSize != 0 && o.SpriteDataSize != want {
+			return cf, fmt.Errorf("%s declares %d bytes per sprite but sprite-size %d with transparency:%t means %d; fix the otfi or the client cannot be read",
+				base+".otfi", o.SpriteDataSize, o.Features.SpriteSize, o.Features.Transparency, want)
+		}
 		cf.HasOTFI = true
 		cf.Features = o.Features
 		if o.MetadataFile != "" {
