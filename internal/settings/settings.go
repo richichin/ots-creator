@@ -18,7 +18,7 @@ import (
 )
 
 // MaxRecent is the number of remembered clients.
-const MaxRecent = 10
+const MaxRecent = 20
 
 // Sheet backgrounds.
 const (

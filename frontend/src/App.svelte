@@ -26,6 +26,7 @@
   import ItemsOtbDialog from "./features/dialogs/ItemsOtbDialog.svelte";
   import ShareDialog from "./features/market/ShareDialog.svelte";
   import { listPanelWidth, loadPrefs, prefs, recentDir, removeRecent, shortPath } from "./lib/prefs.svelte";
+  import { dragList, dragProps, minLayoutWidth } from "./lib/layout";
   import { setMinLayoutWidth } from "./lib/pixelscale";
   import SpriteList from "./features/SpriteList.svelte";
   import StatusBar from "./features/StatusBar.svelte";
@@ -83,6 +84,47 @@
     }
   }
 
+  // Widths of the object list and of the properties panel: both are dragged
+  // with a splitter. A dragged width wins over the "objects per row" preset,
+  // which takes over again when that setting changes.
+  const LIST_KEY = "layout:list-width";
+  const PROPS_KEY = "layout:props-width";
+  let main = $state<HTMLElement>();
+  let listDragged = $state(loadNum(LIST_KEY, 0));
+  let propsWidth = $state(loadNum(PROPS_KEY, 360));
+  let lastColumns = prefs.settings.listColumns;
+
+  function loadNum(key: string, def: number): number {
+    try {
+      const v = Number(localStorage.getItem(key));
+      if (v > 0) return v;
+    } catch {
+      /* storage unavailable */
+    }
+    return def;
+  }
+
+  function saveNum(key: string, v: number) {
+    try {
+      localStorage.setItem(key, String(v));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function saveWidths() {
+    saveNum(LIST_KEY, listDragged);
+    saveNum(PROPS_KEY, propsWidth);
+  }
+
+  function resizeList(d: number) {
+    listDragged = dragList(main?.clientWidth || 1200, listWidth, propsWidth, d);
+  }
+
+  function resizeProps(d: number) {
+    propsWidth = dragProps(main?.clientWidth || 1200, listWidth, propsWidth, d);
+  }
+
   // The backend holds window closes while edits are unapplied.
   $effect(() => {
     const dirty = app.dirty;
@@ -107,11 +149,21 @@
     };
   });
 
-  const recent = $derived((prefs.settings.recent ?? []).slice(0, 6));
+  const recent = $derived((prefs.settings.recent ?? []).slice(0, 20));
 
-  // The object list panel is as wide as its chosen number of columns.
-  const listWidth = $derived(listPanelWidth(prefs.settings.listColumns || 7));
-  $effect(() => setMinLayoutWidth(listWidth + 740));
+  // The object list is as wide as the chosen number of columns unless the user
+  // dragged it; changing that setting takes over again.
+  const listPreset = $derived(listPanelWidth(prefs.settings.listColumns || 7));
+  const listWidth = $derived(listDragged || listPreset);
+  $effect(() => {
+    const columns = prefs.settings.listColumns;
+    if (columns !== lastColumns) {
+      lastColumns = columns;
+      listDragged = 0;
+      saveNum(LIST_KEY, 0);
+    }
+  });
+  $effect(() => setMinLayoutWidth(minLayoutWidth(listWidth, propsWidth)));
 </script>
 
 <svelte:window {onkeydown} />
@@ -122,11 +174,12 @@
   {#if map.mode === "map"}
     <MapEditor bind:hoverText={mapHover} />
   {:else}
-  <main style="--list-w:{listWidth}px">
+  <main bind:this={main} style="--list-w:{listWidth}px; --props-w:{propsWidth}px">
     {#if app.open}
       <div class="left">
         <ThingList />
       </div>
+      <Splitter vertical ondrag={resizeList} onend={saveWidths} />
       <div class="center" bind:this={center} style="--sprites-h:{spritesHeight}px">
         <section class="t-window editor">
           <div class="t-window-title">Preview</div>
@@ -135,6 +188,7 @@
         <Splitter ondrag={resizeSprites} onend={saveHeight} />
         <SpriteList />
       </div>
+      <Splitter vertical ondrag={resizeProps} onend={saveWidths} />
       <div class="right">
         {#if app.selection.length > 1}<BulkEdit />{:else}<Properties bind:group />{/if}
       </div>
@@ -205,15 +259,12 @@
   main {
     flex: 1;
     min-height: 0;
-    display: grid;
-    /* The object list keeps its width; the editor keeps at least 460px and
-       the properties panel gives up width first. The sum (with gaps) is
-       MIN_LAYOUT.width in pixelscale.ts. */
-    /* --list-w fits the chosen objects per row (Settings). */
-    grid-template-columns: var(--list-w, 300px) minmax(460px, 1fr) minmax(250px, 280px);
-    min-width: calc(var(--list-w, 300px) + 734px); /* 460 + 250 + gaps */
-    gap: 6px;
+    display: flex;
+    /* The panels are separated by the splitter handles, not by a gap. */
+    gap: 0;
     padding: 6px;
+    /* list + splitters + editor minimum + properties, plus the padding. */
+    min-width: calc(var(--list-w, 300px) + var(--props-w, 360px) + 484px);
   }
   .left,
   .right,
@@ -222,6 +273,18 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  .left {
+    flex: none;
+    width: var(--list-w, 300px);
+  }
+  .right {
+    flex: none;
+    width: var(--props-w, 360px);
+  }
+  .center {
+    flex: 1 1 auto;
+    min-width: 460px;
   }
   .left :global(.things),
   .right :global(.props) {
@@ -242,12 +305,12 @@
     padding: 8px 10px 8px;
   }
   .welcome {
-    grid-column: 1 / -1;
+    flex: 1;
     display: grid;
     place-items: center;
   }
   .card {
-    width: 400px;
+    width: 440px;
     padding: 16px 20px 14px;
     align-items: center;
     text-align: center;
@@ -268,6 +331,9 @@
   }
   .rlist {
     padding: 2px;
+    /* Up to 20 clients: eight rows, the rest scrolls. */
+    max-height: 190px;
+    overflow-y: auto;
   }
   .ritem {
     display: flex;

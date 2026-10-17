@@ -190,7 +190,8 @@
       <section>
         <h4>Flags</h4>
         <input class="t-input filter" placeholder="Filter flags…" bind:value={filter} />
-        {#each FLAG_GROUPS as grp}
+        <div class="groups">
+          {#each FLAG_GROUPS as grp}
           {@const flags = grp.flags.filter((f) => flagVisible(f.key, t.category, !!(t.props as any)[f.key]) && matches(f.label, f.key))}
           {#if flags.length}
             <div class="group">
@@ -252,7 +253,8 @@
               {/if}
             </div>
           {/if}
-        {/each}
+          {/each}
+        </div>
       </section>
     </div>
     <div class="t-sep"></div>
@@ -337,6 +339,15 @@
     width: 100%;
     margin-bottom: 6px;
   }
+  /* Flags flow in as many 150px columns as the panel holds, so a widened
+     properties panel shows two of them; a group never splits across columns. */
+  .groups {
+    column-width: 150px;
+    column-gap: 10px;
+  }
+  .group {
+    break-inside: avoid;
+  }
   .ghead {
     font: bold var(--fs) var(--font);
     color: var(--text);
@@ -357,6 +368,7 @@
   }
   .flag {
     padding: 2px 0 2px 10px;
+    break-inside: avoid;
   }
   .flag .on {
     color: var(--text-bright);
