@@ -123,6 +123,12 @@ func Open(o OpenOptions) (*Project, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", filepath.Base(o.SprPath), err)
 	}
+	// A client exported without an otfi decodes every sprite with the wrong
+	// number of channels when the transparency default does not match the file,
+	// which shows up as "pixel overflow" on a blank preview. Ask the sprites.
+	if t, ok := detectsTransparency(sf, things, f); ok {
+		f.Transparency = t
+	}
 	p := &Project{
 		version:        v,
 		features:       f,
@@ -135,6 +141,60 @@ func Open(o OpenOptions) (*Project, error) {
 	}
 	p.resetBase()
 	return p, nil
+}
+
+// transparentSampleSprites is the number of sprites probed to tell whether a
+// spr file keeps an alpha channel.
+const transparentSampleSprites = 64
+
+// detectsTransparency reports whether the sprites of a client only decode with
+// the other transparency a file could have, and which one that is. Dat and spr
+// files do not say it (the otfi does), so a client without one is read with the
+// defaults of its version, which are wrong for most exported servers.
+func detectsTransparency(sf *spr.File, things *dat.File, f client.Features) (bool, bool) {
+	ids := sampleSpriteIDs(things, transparentSampleSprites)
+	if len(ids) == 0 || decodesSprites(sf, ids) {
+		return f.Transparency, false
+	}
+	flipped := !f.Transparency
+	if !decodesSprites(sf.WithTransparency(flipped), ids) {
+		return f.Transparency, false
+	}
+	return flipped, true
+}
+
+// decodesSprites reports whether every sampled sprite decodes with the settings
+// of sf: with the wrong number of channels the first ones already overflow.
+func decodesSprites(sf *spr.File, ids []uint32) bool {
+	for _, id := range ids {
+		if _, err := sf.Pixels(id); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// sampleSpriteIDs collects up to n sprite ids of the first things, skipping the
+// empty slots (id 0).
+func sampleSpriteIDs(file *dat.File, n int) []uint32 {
+	out := make([]uint32, 0, n)
+	for _, c := range thing.Categories {
+		for _, t := range file.Things[c] {
+			if t == nil {
+				continue
+			}
+			for _, id := range t.SpriteIDs() {
+				if id == 0 {
+					continue
+				}
+				out = append(out, id)
+				if len(out) >= n {
+					return out
+				}
+			}
+		}
+	}
+	return out
 }
 
 // New creates an empty client with one item, outfit, effect and missile,

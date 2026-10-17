@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"os"
 	"path/filepath"
@@ -98,6 +99,39 @@ func TestOpenUnknownVersion(t *testing.T) {
 	}
 }
 
+// TestOpenDetectsTransparency checks that a client whose spr keeps an alpha
+// channel is read even when nothing (no otfi) says so: the sprites decide.
+func TestOpenDetectsTransparency(t *testing.T) {
+	dir := t.TempDir()
+	for _, transparent := range []bool{true, false} {
+		p := New(v1098(), client.Features{Transparency: transparent})
+		if _, err := p.AddSprites([][]byte{solid(255, 0, 0)}); err != nil {
+			t.Fatal(err)
+		}
+		it, _ := p.Thing(thing.CategoryItem, 100)
+		it.FrameGroups[0].Sprites[0] = 1
+		if err := p.UpdateThing(it); err != nil {
+			t.Fatal(err)
+		}
+		datPath := filepath.Join(dir, fmt.Sprintf("t%t.dat", transparent))
+		sprPath := filepath.Join(dir, fmt.Sprintf("t%t.spr", transparent))
+		if err := p.Compile(CompileOptions{DatPath: datPath, SprPath: sprPath, Version: v1098(), Features: p.Info().Features}); err != nil {
+			t.Fatal(err)
+		}
+		// No otfi: the version defaults say opaque either way.
+		q, err := Open(OpenOptions{DatPath: datPath, SprPath: sprPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := q.Info().Features.Transparency; got != transparent {
+			t.Fatalf("transparency %t detected as %t", transparent, got)
+		}
+		px, err := q.SpritePixels(1)
+		if err != nil || px[0] != 255 || px[3] != 255 {
+			t.Fatalf("pixels %v %v", px[:4], err)
+		}
+	}
+}
 func TestCompileTransparencyChange(t *testing.T) {
 	dir := t.TempDir()
 	p := New(v1098(), client.Features{})

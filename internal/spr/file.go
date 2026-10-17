@@ -98,6 +98,16 @@ func (f *File) Pixels(id uint32) ([]byte, error) {
 	return px, nil
 }
 
+// WithTransparency returns a view of the same data decoded with another
+// transparency setting, to tell which one a file really uses.
+func (f *File) WithTransparency(transparent bool) *File {
+	o := f.opts
+	o.Transparent = transparent
+	g := *f
+	g.opts = o
+	return &g
+}
+
 // Source supplies compressed sprites for Encode.
 type Source interface {
 	// Count returns the number of sprites (highest id).
