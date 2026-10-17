@@ -21,7 +21,7 @@
   import { Animator, guessImproved, previewDurations } from "../lib/render/animator";
   import { PREVIEW_DROP } from "../lib/commands";
   import { compose, stackBottomRight, type PixelSource } from "../lib/render/compose";
-  import { clampPos, fillSlots, textureSlots, type TexturePos } from "../lib/render/layout";
+  import { clampPos, fillSlots, spriteIndex, textureSlots, type TexturePos } from "../lib/render/layout";
   import { droppedSprites } from "../lib/dragsprites";
   import SheetEditor from "./SheetEditor.svelte";
   import { DEFAULT_COLORS, type OutfitColors } from "../lib/render/outfit";
@@ -340,6 +340,15 @@
     if (!g) return;
     playing = false;
     pos.frame = (pos.frame + delta + g.frames) % g.frames;
+    focusFrameSprite();
+  }
+
+  /** Marks the sprite of the texture now on screen in the sprite list, so
+   * stepping frames moves the selection (and the list scrolls) with them. */
+  function focusFrameSprite() {
+    if (!g || readonly) return;
+    const id = g.sprites[spriteIndex(g, 0, 0, pos)];
+    if (id) app.selectedSprites = [id];
   }
 
   /** Puts sprites into slot and the following ones (multi-drag). */
