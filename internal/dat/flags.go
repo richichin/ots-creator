@@ -302,6 +302,13 @@ func Table(format int) *FlagTable {
 // Name returns a human readable name of the table.
 func (t *FlagTable) Name() string { return t.name }
 
+// StoresNpcSales reports whether the format keeps the NPC sale list.
+func (t *FlagTable) StoresNpcSales() bool { return t.npcSales != 0 }
+
+// StoresExtraFlags reports whether the format keeps the flags the model has no
+// property for.
+func (t *FlagTable) StoresExtraFlags() bool { return len(t.extras) > 0 }
+
 // ReadProperties reads flags until LastFlag into p. Flags the model has no
 // field for are skipped.
 func (t *FlagTable) ReadProperties(r *binio.Reader, p *thing.Properties) error {

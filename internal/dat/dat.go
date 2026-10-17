@@ -88,7 +88,44 @@ func Decode(data []byte, opts Options) (*File, error) {
 		}
 		f.Things[c] = list
 	}
+	// A flag table that does not fit the file desyncs somewhere in the middle
+	// and reads garbage without ever failing, so the file has to end exactly.
+	if left := r.Remaining(); left != 0 {
+		return nil, fmt.Errorf("dat: %d bytes left after the last thing (flag table %s does not fit the file)", left, table.Name())
+	}
 	return f, nil
+}
+
+// Detect parses a dat file with the flag table Opts.Format asks for and, when
+// that table does not fit the file, tries the other tables. It returns the file
+// and the format that consumed it, so a client whose version maps to the wrong
+// table (a 12.x built on the 13.x format, for example) still opens.
+func Detect(data []byte, opts Options) (*File, int, error) {
+	var firstErr error
+	for i, format := range candidateFormats(opts.Format) {
+		o := opts
+		o.Format = format
+		f, err := Decode(data, o)
+		if err == nil {
+			return f, format, nil
+		}
+		if i == 0 {
+			firstErr = err
+		}
+	}
+	return nil, opts.Format, fmt.Errorf("no flag table fits the file: %w", firstErr)
+}
+
+// candidateFormats lists the tables to try for a file: the requested one, then
+// the newest ones, which are the closest versions of each other.
+func candidateFormats(want int) []int {
+	out := []int{want}
+	for _, format := range []int{7, 6, 5, 4, 3, 2, 1} {
+		if format != want {
+			out = append(out, format)
+		}
+	}
+	return out
 }
 
 // ReadThing decodes one thing (flags + texture patterns) from r. OBD v1

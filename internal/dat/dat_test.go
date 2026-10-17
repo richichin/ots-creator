@@ -25,7 +25,7 @@ func fullProps() thing.Properties {
 		HasElevation: true, Elevation: 8, LyingObject: true, AnimateAlways: true,
 		MiniMap: true, MiniMapColor: 129, LensHelp: true, LensHelpValue: 1112,
 		FullGround: true, IgnoreLook: true, Cloth: true, ClothSlot: 5,
-		IsMarket: true, Market: thing.Market{Category: 3, TradeAs: 2400, ShowAs: 2401, Name: "magic sword é", RestrictProfession: 1, RestrictLevel: 80},
+		IsMarket: true, Market: thing.Market{Category: 3, TradeAs: 2400, ShowAs: 2401, Name: "magic sword Ã©", RestrictProfession: 1, RestrictLevel: 80},
 		HasDefaultAction: true, DefaultAction: 2, Wrappable: true, Unwrappable: true,
 		TopEffect: true, Usable: true, HasBones: true,
 		Bones: [4]thing.Point{{X: 1, Y: 2}, {X: 3, Y: 4}, {X: 5, Y: 6}, {X: 7, Y: 8}},
@@ -294,5 +294,58 @@ func TestUnsupportedListsLostFlags(t *testing.T) {
 	u := table4.Unsupported(&p)
 	if len(u) != 2 {
 		t.Fatalf("unsupported = %v", u)
+	}
+}
+
+// TestDecodeRejectsTrailingBytes checks that a flag table that does not fit the
+// file is an error: a desync reads garbage things without ever failing, so the
+// file has to end exactly where the last thing ends.
+func TestDecodeRejectsTrailingBytes(t *testing.T) {
+	opts := OptionsFor(1098, client.Features{})
+	data, err := Encode(sampleFile(true), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	junk := append(append([]byte(nil), data...), 0, 0, 0)
+	if _, err := Decode(junk, opts); err == nil || !strings.Contains(err.Error(), "bytes left") {
+		t.Fatalf("trailing bytes must be an error, got %v", err)
+	}
+	if _, err := Decode(data, opts); err != nil {
+		t.Fatalf("the clean file must decode: %v", err)
+	}
+}
+
+// TestDetectFallsBack reports which table fits a file whose version points at
+// another one, so such a client opens and is written back the way it was read.
+func TestDetectFallsBack(t *testing.T) {
+	thirteen := OptionsFor(1310, client.Features{})
+	src := sampleFile(true)
+	// The 13.10 NPC sale flag (0x30) does not exist for the 10.x table.
+	src.Things[thing.CategoryItem][0].NpcSales = []thing.NpcSale{{Name: "Black Bert", Location: "Thais City", SalePrice: 5000}}
+	data, err := Encode(src, thirteen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := Options{Format: 6, Features: thirteen.Features}
+	if _, err := Decode(data, wrong); err == nil {
+		t.Fatal("the 10.x table must not read a 13.10 file")
+	}
+	got, format, err := Detect(data, wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != 7 {
+		t.Fatalf("Detect found format %d, want 7", format)
+	}
+	sales := got.Get(thing.CategoryItem, 100).NpcSales
+	if len(sales) != 1 || sales[0].Name != "Black Bert" {
+		t.Fatalf("npc sales lost: %+v", sales)
+	}
+	again, err := Encode(got, thirteen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(again, data) {
+		t.Fatal("re-encode with the detected format differs")
 	}
 }

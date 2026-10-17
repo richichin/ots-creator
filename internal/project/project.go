@@ -55,6 +55,11 @@ type Project struct {
 	version  client.Version
 	features client.Features
 	format   Format
+	// detectedFormat is the dat flag table that fitted the file when it was
+	// opened, 0 for a project that was never read from disk. It wins over the
+	// version default so a client whose version maps to another table keeps
+	// being written the way it was read.
+	detectedFormat int
 	// datPath is the asset folder for FormatAssets.
 	datPath string
 	sprPath string
@@ -110,7 +115,7 @@ func Open(o OpenOptions) (*Project, error) {
 	}
 	f := o.Features
 	f.ApplyVersionDefaults(v.Value)
-	things, err := dat.Decode(datBytes, dat.Options{Format: client.MetadataFormat(v.Value), Features: f})
+	things, format, err := dat.Detect(datBytes, dat.Options{Format: client.MetadataFormat(v.Value), Features: f})
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", filepath.Base(o.DatPath), err)
 	}
@@ -119,13 +124,14 @@ func Open(o OpenOptions) (*Project, error) {
 		return nil, fmt.Errorf("read %s: %w", filepath.Base(o.SprPath), err)
 	}
 	p := &Project{
-		version:  v,
-		features: f,
-		format:   FormatDat,
-		datPath:  o.DatPath,
-		sprPath:  o.SprPath,
-		things:   things,
-		sprites:  newSpriteStore(sprFile(sf), f.SpriteSize, f.Transparency),
+		version:        v,
+		features:       f,
+		format:         FormatDat,
+		detectedFormat: format,
+		datPath:        o.DatPath,
+		sprPath:        o.SprPath,
+		things:         things,
+		sprites:        newSpriteStore(sprFile(sf), f.SpriteSize, f.Transparency),
 	}
 	p.resetBase()
 	return p, nil
@@ -160,13 +166,24 @@ func (p *Project) Info() Info {
 	return p.infoLocked()
 }
 
+// datFormat returns the dat flag table to use for a client version: the one
+// the file was opened with when it is the same client, the version default
+// otherwise (it is a different client being written).
+func (p *Project) datFormat(v client.Version) int {
+	if p.detectedFormat != 0 && v.Value == p.version.Value {
+		return p.detectedFormat
+	}
+	return client.MetadataFormat(v.Value)
+}
+
 func (p *Project) infoLocked() Info {
 	var otb *OTBInfo
 	if p.otb != nil {
 		in := p.otb.info
 		otb = &in
 	}
-	label, supported := dat.Table(client.MetadataFormat(p.version.Value)).Name(), dat.Table(client.MetadataFormat(p.version.Value)).Supported()
+	table := dat.Table(p.datFormat(p.version))
+	label, supported := table.Name(), table.Supported()
 	if p.format == FormatAssets {
 		label, supported = "Protobuf appearances", assets.Supported()
 	}
@@ -278,7 +295,8 @@ func (p *Project) Compile(o CompileOptions) error {
 		return fmt.Errorf("changing sprite size from %d to %d is not supported", p.features.SpriteSize, f.SpriteSize)
 	}
 	file := &dat.File{Signature: o.Version.DatSignature, Things: p.things.Things}
-	datBytes, err := dat.Encode(file, dat.Options{Format: client.MetadataFormat(o.Version.Value), Features: f})
+	format := p.datFormat(o.Version)
+	datBytes, err := dat.Encode(file, dat.Options{Format: format, Features: f})
 	if err != nil {
 		return err
 	}
@@ -301,6 +319,10 @@ func (p *Project) Compile(o CompileOptions) error {
 	}
 	if o.WriteOTFI {
 		otfi := client.OTFI{Features: f, MetadataFile: filepath.Base(o.DatPath), SpritesFile: filepath.Base(o.SprPath)}
+		// The 13.x clients read the bytes per sprite from the otfi.
+		if client.MetadataFormat(o.Version.Value) >= 7 {
+			otfi.SpriteDataSize = f.ExpectedSpriteDataSize()
+		}
 		base := filepath.Join(filepath.Dir(o.DatPath), trimExt(filepath.Base(o.DatPath))+".otfi")
 		if err := writeAtomic(base, otfi.Marshal()); err != nil {
 			return err
@@ -315,6 +337,7 @@ func (p *Project) Compile(o CompileOptions) error {
 	p.sprites = newSpriteStore(sprFile(sf), f.SpriteSize, f.Transparency)
 	p.format, p.assets = FormatDat, nil
 	p.version, p.features = o.Version, f
+	p.detectedFormat = format
 	p.datPath, p.sprPath = o.DatPath, o.SprPath
 	p.things.Signature = o.Version.DatSignature
 	p.saved()
@@ -338,18 +361,25 @@ func (p *Project) Warnings(format Format, v client.Version) []string {
 	if format == FormatAssets {
 		return p.assetWarnings()
 	}
-	table := dat.Table(client.MetadataFormat(v.Value))
+	table := dat.Table(p.datFormat(v))
 	var out []string
+	extras := 0
 	for _, c := range thing.Categories {
 		for _, t := range p.things.Things[c] {
 			u := table.Unsupported(&t.Props)
-			if len(t.NpcSales) > 0 {
+			if len(t.NpcSales) > 0 && !table.StoresNpcSales() {
 				u = append(u, "npcSales")
 			}
 			if len(u) > 0 {
 				out = append(out, fmt.Sprintf("%s %d: %v", c, t.ID, u))
 			}
+			if _, ok := t.Extra.(*dat.Thing13); ok {
+				extras++
+			}
 		}
+	}
+	if extras > 0 && !table.StoresExtraFlags() {
+		out = append(out, fmt.Sprintf("%d things store 13.10 flags this format cannot save", extras))
 	}
 	return out
 }
