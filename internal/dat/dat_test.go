@@ -257,7 +257,9 @@ func TestFileNoPatternZ(t *testing.T) {
 	}
 }
 
-func TestSingleOutfitGroupWrittenAsWalking(t *testing.T) {
+// TestOutfitGroupTypeIsKept checks that a group type goes back to the file as it
+// came: rewriting a client must not turn an idle group into a walking one.
+func TestOutfitGroupTypeIsKept(t *testing.T) {
 	opts := OptionsFor(1098, client.Features{})
 	o := thing.New(1, thing.CategoryOutfit)
 	w := binio.NewWriter(0)
@@ -265,9 +267,17 @@ func TestSingleOutfitGroupWrittenAsWalking(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := w.Bytes()
-	// flags: LastFlag, then group count 1, group type 1
-	if b[0] != LastFlag || b[1] != 1 || b[2] != 1 {
-		t.Fatalf("bytes = %v", b[:3])
+	// flags: LastFlag, then group count 1, group type 0 (idle, the default).
+	if b[0] != LastFlag || b[1] != 1 || b[2] != 0 {
+		t.Fatalf("single idle group bytes = %v", b[:3])
+	}
+	o.FrameGroups[0].Type = thing.FrameGroupWalking
+	w = binio.NewWriter(0)
+	if err := WriteThing(w, o, opts); err != nil {
+		t.Fatal(err)
+	}
+	if b := w.Bytes(); b[2] != 1 {
+		t.Fatalf("walking group bytes = %v", b[:3])
 	}
 }
 

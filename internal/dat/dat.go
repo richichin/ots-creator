@@ -257,14 +257,13 @@ func WriteThing(w *binio.Writer, t *thing.Thing, opts Options) error {
 	} else {
 		w.U8(uint8(len(groups)))
 	}
-	for i, g := range groups {
+	for _, g := range groups {
 		if withGroups {
-			// ObjectBuilder marks a lone outfit group as "walking" (1).
-			typ := uint8(i)
-			if len(groups) < 2 {
-				typ = 1
-			}
-			w.U8(typ)
+			// The type read from the file goes back as it came: a client dat
+			// keeps exactly what it had. ObjectBuilder, which only the OBD
+			// writer has to please, is the one that wants a lone group marked
+			// as walking.
+			w.U8(uint8(g.Type))
 		}
 		if err := WriteGroup(w, g, opts.hasPatternZ(), opts.Features.ImprovedAnimations, opts.Features.Extended); err != nil {
 			return err
